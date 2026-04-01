@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cloudflare 兩頭接 | LINE Bot × OpenClaw | Static</title>
+    <meta
+      name="description"
+      content="以 Cloudflare Worker + Hono 作為邊界層，串接 LINE Bot 與 OpenClaw 的專案實作方案。"
+    />
+    <link rel="stylesheet" href="./static-styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <nav class="topbar">
+          <span class="brand">Newsagora / Static Proposal</span>
+          <div class="topbar-actions">
+            <a class="pill-link" href="./">看 Vue 版</a>
+            <a class="pill-link" href="#roadmap">實作順序</a>
+          </div>
+        </nav>
+
+        <div class="hero-grid">
+          <section class="hero-copy">
+            <p class="eyebrow">Cloudflare 兩頭接</p>
+            <h1>LINE Bot × OpenClaw 專案工程實作方案</h1>
+            <p class="hero-text">
+              用 <strong>Cloudflare Worker + Hono</strong> 當邊界層，前面安全接住
+              LINE webhook，後面提供受保護 API 給 OpenClaw 定期處理新聞、摘要與
+              polis 題目，讓整體資料流更穩、更清楚、更容易擴充。
+            </p>
+
+            <div class="hero-actions">
+              <a class="button primary" href="#architecture">看總體架構</a>
+              <a class="button secondary" href="#apis">看 API 規格</a>
+            </div>
+
+            <ul class="signal-list">
+              <li>Worker 負責驗證、整理、保護與記錄</li>
+              <li>OpenClaw 專心處理 AI 摘要與題目生成</li>
+              <li>LINE Bot 專注互動、推播與投票回收</li>
+            </ul>
+          </section>
+
+          <aside class="hero-panel">
+            <div class="stat-card">
+              <span class="stat-label">核心原則</span>
+              <strong>邊界層與 AI 流程解耦</strong>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">MVP 範圍</span>
+              <strong>Webhook + Token API + D1</strong>
+            </div>
+            <div class="mini-diagram">
+              <div>新聞來源</div>
+              <span></span>
+              <div>Worker / Hono</div>
+              <span></span>
+              <div>LINE / OpenClaw</div>
+            </div>
+          </aside>
+        </div>
+      </header>
+
+      <main>
+        <section class="section intro" id="vision">
+          <div class="section-heading">
+            <p class="eyebrow">專案目標</p>
+            <h2>把「接收事件」與「AI 處理」分成兩條清楚的責任線</h2>
+          </div>
+          <div class="cards three-up">
+            <article class="card">
+              <h3>對外</h3>
+              <p>接收 LINE Bot webhook、處理使用者互動、驗證 signature，避免惡意請求直接穿透系統。</p>
+            </article>
+            <article class="card">
+              <h3>對內</h3>
+              <p>提供 OpenClaw 定期輪詢的內部 API，讓摘要、分類與題目生成有獨立節奏可控。</p>
+            </article>
+            <article class="card">
+              <h3>對營運</h3>
+              <p>把資料整理、安全控管、記錄與狀態管理集中在 Worker，後續上線與除錯都更容易。</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="architecture">
+          <div class="section-heading">
+            <p class="eyebrow">總體架構</p>
+            <h2>一個 Worker，接住兩種方向完全不同的流量</h2>
+          </div>
+
+          <div class="architecture-layout">
+            <div class="lane lane-input">
+              <h3>輸入端</h3>
+              <ul>
+                <li>新聞來源 / RSS</li>
+                <li>手動匯入</li>
+                <li>LINE Webhook 事件</li>
+              </ul>
+            </div>
+
+            <div class="hub">
+              <h3>Cloudflare Worker + Hono</h3>
+              <ul>
+                <li><code>POST /line/webhook</code></li>
+                <li><code>GET /api/news/pending</code></li>
+                <li><code>POST /api/news/:id/process</code></li>
+                <li><code>GET /api/polis/payloads</code></li>
+                <li>LINE Signature 驗證</li>
+                <li>Token 驗證 / 日誌 / 節流</li>
+              </ul>
+            </div>
+
+            <div class="lane lane-output">
+              <h3>輸出端</h3>
+              <ul>
+                <li>LINE Bot 互動與推播</li>
+                <li>OpenClaw 定期排程</li>
+                <li>AI 摘要與 polis 題目生成</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-heading">
+            <p class="eyebrow">模組拆分</p>
+            <h2>把系統分成三塊，讓每一塊只做自己擅長的事</h2>
+          </div>
+          <div class="cards three-up">
+            <article class="card accent-red">
+              <h3>A. LINE Webhook 入口</h3>
+              <p>接收使用者訊息、按鈕與 postback，使用原始 body 驗證 <code>x-line-signature</code>，必要時把事件寫進 D1 或 KV。</p>
+            </article>
+            <article class="card accent-blue">
+              <h3>B. OpenClaw 專用 API</h3>
+              <p>提供待處理新聞、接收 AI 回寫、交付待投放的 polis 載荷，只允許帶正確 token 的客戶端存取。</p>
+            </article>
+            <article class="card accent-gold">
+              <h3>C. 資料層</h3>
+              <p>以 KV 處理簡單狀態與快取，以 D1 保存新聞、摘要、任務、使用者與 bot 事件，先滿足 MVP，再逐步擴充。</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section split-section">
+          <div class="section-heading">
+            <p class="eyebrow">為什麼這樣設計</p>
+            <h2>兩頭接，不只是接得上，而是接得穩</h2>
+          </div>
+          <div class="reason-grid">
+            <article class="reason">
+              <h3>降低安全風險</h3>
+              <p>LINE webhook 不直接打到 AI 流程，先由 Worker 進行驗證、過濾與紀錄，可以把攻擊面壓到最小。</p>
+            </article>
+            <article class="reason">
+              <h3>邊界責任集中</h3>
+              <p>Header 檢查、節流、日誌與 request 驗證都留在 Worker，系統錯誤點更容易定位與處理。</p>
+            </article>
+            <article class="reason">
+              <h3>AI 任務更專注</h3>
+              <p>OpenClaw 不必理解 LINE 平台細節，只需定期拉資料、產出摘要與題目，再把結果回寫即可。</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section security-section">
+          <div class="section-heading">
+            <p class="eyebrow">安全設計</p>
+            <h2>先把邊界守住，再談流程自動化</h2>
+          </div>
+          <div class="security-grid">
+            <article class="security-card">
+              <h3>LINE Webhook 驗證</h3>
+              <p>使用 channel secret 對原始 request body 做 HMAC-SHA256，與 <code>x-line-signature</code> 比對，失敗直接拒絕。</p>
+              <ul>
+                <li>一定使用原始 body</li>
+                <li>先驗證再 parse</li>
+                <li>失敗回 <code>401</code> 或 <code>403</code></li>
+              </ul>
+            </article>
+            <article class="security-card">
+              <h3>OpenClaw API 保護</h3>
+              <p>最少先做三層：Bearer Token、來源識別、時間戳與簽章，避免未授權調用與重放攻擊。</p>
+              <ul>
+                <li><code>Authorization: Bearer &lt;TOKEN&gt;</code></li>
+                <li><code>X-Client-Id</code> 區分節點</li>
+                <li><code>X-Timestamp</code> + <code>X-Signature</code> 進階保護</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="apis">
+          <div class="section-heading">
+            <p class="eyebrow">MVP API 規格</p>
+            <h2>第一版先把最關鍵的四個入口釘穩</h2>
+          </div>
+          <div class="api-grid">
+            <article class="api-card">
+              <p class="method post">POST</p>
+              <h3>/line/webhook</h3>
+              <p>接收 LINE 平台 webhook，成功回 <code>200 OK</code>，簽章驗證失敗回 <code>401 Unauthorized</code>。</p>
+            </article>
+            <article class="api-card">
+              <p class="method get">GET</p>
+              <h3>/api/news/pending</h3>
+              <p>由 OpenClaw 定期拉取待處理新聞，header 需帶共享 token。</p>
+            </article>
+            <article class="api-card">
+              <p class="method post">POST</p>
+              <h3>/api/news/:id/process</h3>
+              <p>回寫 AI 摘要、關鍵字、polis draft 與狀態，讓 Worker 管理處理進度。</p>
+            </article>
+            <article class="api-card">
+              <p class="method get">GET</p>
+              <h3>/api/polis/payloads</h3>
+              <p>提供後續投放流程所需的投票載荷，銜接審核、推播與投票機制。</p>
+            </article>
+          </div>
+
+          <div class="code-showcase">
+            <div class="code-header">
+              <span>API response sample</span>
+              <span>news pending</span>
+            </div>
+            <pre><code>{
+  "items": [
+    {
+      "id": "news_001",
+      "title": "某新聞標題",
+      "url": "https://example.com/news/1",
+      "content": "新聞內文或擷取內容",
+      "createdAt": "2026-03-27T10:00:00Z"
+    }
+  ]
+}</code></pre>
+          </div>
+        </section>
+
+        <section class="section split-section">
+          <div class="section-heading">
+            <p class="eyebrow">資料流</p>
+            <h2>從收集到投放，先建立一條最短可行的處理管線</h2>
+          </div>
+          <div class="flow-steps">
+            <article class="flow-step">
+              <span>01</span>
+              <h3>收集</h3>
+              <p>新聞從 RSS、手動匯入或 webhook 進入 <code>news_items</code>，狀態先標為 <code>pending</code>。</p>
+            </article>
+            <article class="flow-step">
+              <span>02</span>
+              <h3>AI 整理</h3>
+              <p>OpenClaw 用排程抓取待處理新聞，產生摘要、標題整理與 polis statements。</p>
+            </article>
+            <article class="flow-step">
+              <span>03</span>
+              <h3>審核</h3>
+              <p>加入 <code>review_status</code>，避免不適當題目直接流向使用者，提高內容品質與安全性。</p>
+            </article>
+            <article class="flow-step">
+              <span>04</span>
+              <h3>LINE 投放</h3>
+              <p>Worker 從 <code>polis_tasks</code> 取出可投放題目，透過 Messaging API 推送並回收互動結果。</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section roadmap-section" id="roadmap">
+          <div class="section-heading">
+            <p class="eyebrow">實作順序</p>
+            <h2>先把最值錢的事情做好，不急著把系統做滿</h2>
+          </div>
+          <ol class="roadmap-list">
+            <li>建立 Cloudflare Worker + Hono 專案骨架。</li>
+            <li>完成 <code>POST /line/webhook</code> 與 LINE signature 驗證。</li>
+            <li>加入 <code>/api/*</code> Bearer Token middleware。</li>
+            <li>建立 D1 schema，先落 <code>news_items</code> 與 <code>ai_summaries</code>。</li>
+            <li>讓 OpenClaw 能抓待處理新聞並回寫摘要。</li>
+            <li>最後再接 LINE 推播與 polis 投票資料流。</li>
+          </ol>
+        </section>
+
+        <section class="section footer-panel">
+          <div class="quote-card">
+            <p class="eyebrow">一句話總結</p>
+            <p class="quote">
+              用 Cloudflare Worker + Hono 當邊界層，前面接 LINE Bot，後面開受 Token 保護的 API
+              給 OpenClaw 定期呼叫，會比讓 LINE 直接碰 OpenClaw 更安全，也更容易維護。
+            </p>
+          </div>
+          <div class="links-card">
+            <h3>官方文件入口</h3>
+            <ul>
+              <li><a href="https://developers.line.biz/en/docs/messaging-api/" target="_blank" rel="noreferrer">LINE Messaging API</a></li>
+              <li><a href="https://developers.cloudflare.com/workers/" target="_blank" rel="noreferrer">Cloudflare Workers</a></li>
+              <li><a href="https://hono.dev/docs/" target="_blank" rel="noreferrer">Hono Docs</a></li>
+            </ul>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./static-main.js"></script>
+  </body>
+</html>

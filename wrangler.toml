@@ -1,0 +1,30 @@
+name = "newsagora-api"
+main = "src/worker.js"
+compatibility_date = "2026-04-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "newsagora-mvp"
+database_id = "replace-with-your-d1-database-id"
+
+[[queues.producers]]
+binding = "NEWS_PIPELINE_QUEUE"
+queue = "news-pipeline-queue"
+
+[[queues.consumers]]
+queue = "news-pipeline-queue"
+max_batch_size = 5
+max_batch_timeout = 5
+max_retries = 3
+retry_delay = 30
+
+[[workflows]]
+binding = "NEWS_PIPELINE_WORKFLOW"
+name = "news-pipeline-workflow"
+class_name = "NewsPipelineWorkflow"
+
+[ai]
+binding = "AI"
+
+[vars]
+POLIS_API_BASE = "https://your-polis-api.example.com"

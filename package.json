@@ -1,0 +1,22 @@
+{
+  "name": "newsagora-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "dev:api": "wrangler dev",
+    "deploy:api": "wrangler deploy",
+    "build:ppt": "node scripts/generate-ppt.js",
+    "build:flow-slide": "node scripts/generate-flow-slide.js"
+  },
+  "dependencies": {
+    "pptxgenjs": "^4.0.1",
+    "vue": "^3.5.31"
+  },
+  "devDependencies": {
+    "hono": "^4.12.9",
+    "wrangler": "^4.79.0"
+  }
+}
